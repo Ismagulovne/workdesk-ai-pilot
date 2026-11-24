@@ -47,6 +47,32 @@ fn main() {
         }
         return;
     }
+    // Список запретов пользователя: правит только человек (у ИИ такого инструмента нет).
+    let flag_value = |f: &str| args.iter().position(|a| a == f).and_then(|i| args.get(i + 1)).cloned();
+    if args.iter().any(|a| a == "--blocklist" || a == "--block" || a == "--unblock") {
+        let mut cfg = cfg;
+        if let Some(v) = flag_value("--block") {
+            let v = v.trim().to_string();
+            if !v.is_empty() && !cfg.blocked_targets.iter().any(|b| b.to_lowercase() == v.to_lowercase()) {
+                cfg.blocked_targets.push(v);
+            }
+        }
+        if let Some(v) = flag_value("--unblock") {
+            let v = v.trim().to_lowercase();
+            cfg.blocked_targets.retain(|b| b.to_lowercase() != v);
+        }
+        if args.iter().any(|a| a == "--block" || a == "--unblock") {
+            if let Err(e) = cfg.save() {
+                eprintln!("wdpilot: не удалось сохранить config.json: {e}");
+                std::process::exit(1);
+            }
+        }
+        println!("Список запретов ({}):", cfg.blocked_targets.len());
+        for b in &cfg.blocked_targets {
+            println!("  {b}");
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--ocr") {
         // Диагностика защиты: что распознано в окне и найдена ли запретная фраза.
         let id: u32 = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -126,6 +152,9 @@ const HELP: &str = "wdpilot — WorkDesk AI Pilot, MCP-сервер управл
 
 Запуск как MCP-сервер (stdio):   wdpilot
 Список окон (отладка):           wdpilot --list-windows
+Список запретов:                 wdpilot --blocklist
+Добавить в запреты:              wdpilot --block "ТОО ФРК РОЗНИЦА"
+Убрать из запретов:              wdpilot --unblock "ТОО ФРК РОЗНИЦА"
 Проверка без экрана (CI):        wdpilot --self-test
 Версия:                          wdpilot --version
 

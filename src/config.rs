@@ -21,9 +21,10 @@ pub struct Config {
     pub save_screenshots: bool,
     /// Писать введённый текст в журнал (по умолчанию нет — только длину).
     pub log_typed_text: bool,
-    /// Запретные экраны: если фраза есть в заголовке или в тексте окна (распознавание на
-    /// Windows) — Pilot сразу останавливается. Обязательные фразы убрать нельзя.
-    pub protected_phrases: Vec<String>,
+    /// Список запретов пользователя (например, боевая база 1С). Видеть цель на экране можно;
+    /// клик по ней, по кнопке запуска или Enter, пока она видна, — только с одобрения
+    /// пользователя. Заполняет и правит пользователь: `wdpilot --block "…"`, `--unblock "…"`.
+    pub blocked_targets: Vec<String>,
 }
 
 impl Default for Config {
@@ -47,7 +48,7 @@ impl Default for Config {
             max_pixels: 1_150_000,
             save_screenshots: false,
             log_typed_text: false,
-            protected_phrases: s(&MANDATORY_PROTECTED),
+            blocked_targets: vec![],
         }
     }
 }
@@ -68,6 +69,12 @@ pub fn log_dir() -> PathBuf {
 }
 
 impl Config {
+    pub fn save(&self) -> Result<(), String> {
+        std::fs::create_dir_all(app_dir()).map_err(|e| e.to_string())?;
+        let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        std::fs::write(app_dir().join("config.json"), text).map_err(|e| e.to_string())
+    }
+
     pub fn load() -> Config {
         let path = app_dir().join("config.json");
         let mut cfg = match std::fs::read_to_string(&path) {
@@ -91,19 +98,12 @@ impl Config {
                 cfg.deny_apps.push(m.to_string());
             }
         }
-        for m in MANDATORY_PROTECTED {
-            if !cfg.protected_phrases.iter().any(|d| d.eq_ignore_ascii_case(m)) {
-                cfg.protected_phrases.push(m.to_string());
-            }
-        }
         cfg
     }
 }
 
 pub const MANDATORY_DENY: [&str; 3] = ["wdpilot", "workdesk ai pilot", "claude"];
 
-/// Боевая база 1С владельца: ИИ её не открывает и не выбирает даже по ошибке.
-pub const MANDATORY_PROTECTED: [&str; 1] = ["ТОО ФРК РОЗНИЦА"];
 
 #[cfg(test)]
 mod tests {
@@ -113,6 +113,6 @@ mod tests {
         for m in super::MANDATORY_DENY {
             assert!(c.deny_apps.iter().any(|d| d == m));
         }
-        assert!(c.protected_phrases.iter().any(|p| p == "ТОО ФРК РОЗНИЦА"));
+        assert!(c.blocked_targets.is_empty());
     }
 }
