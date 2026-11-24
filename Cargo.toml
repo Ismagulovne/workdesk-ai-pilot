@@ -1,0 +1,29 @@
+[package]
+name = "wdpilot"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+description = "WorkDesk AI Pilot: MCP-сервер, дающий ИИ-агенту видеть одно выбранное окно и управлять в нём мышью и клавиатурой"
+license-file = "LICENSE"
+authors = ["Nurbolat Ismagulov"]
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+xcap = "0.9.8"
+enigo = "0.6.1"
+device_query = "4.0.1"
+rfd = "0.17.2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+dirs = "6"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "s"
