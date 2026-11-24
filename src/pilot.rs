@@ -56,7 +56,12 @@ pub struct Pilot {
     enigo: Option<Enigo>,
     target: Option<Target>,
     shot: Option<Shot>,
+    /// Когда экран последний раз проверен распознаванием и запретного текста не было.
+    screen_clear_at: Option<std::time::Instant>,
 }
+
+pub const PROTECTED_STOP: &str = "Pilot остановлен и отозвал доступ к окну: ничего не нажимал, снимок не передан. \
+Это запретный экран (боевая база или другое, что ИИ трогать нельзя). Дальше действует только человек.";
 
 fn es<T: std::fmt::Display>(x: T) -> String {
     x.to_string()
@@ -137,7 +142,7 @@ pub fn windows_json(cfg: &Config) -> Result<Value, String> {
 
 impl Pilot {
     pub fn new(cfg: Config, stop: Arc<AtomicBool>) -> Self {
-        Pilot { cfg, stop, enigo: None, target: None, shot: None }
+        Pilot { cfg, stop, enigo: None, target: None, shot: None, screen_clear_at: None }
     }
 
     pub fn log_typed_text(&self) -> bool {
@@ -237,10 +242,58 @@ impl Pilot {
         }
         let title = w.title().unwrap_or_default();
         policy::window_allowed(&self.cfg, &t.app, &title)?;
+        if let Some(p) = crate::ocr::find_protected(&title, &self.cfg.protected_phrases) {
+            let p = p.to_string();
+            return Err(self.protected_hit(&p, "заголовок окна"));
+        }
         if let Some(tt) = self.target.as_mut() {
             tt.title = title;
         }
         Ok(w)
+    }
+
+    /// Запретный текст найден: стоп, доступ отозван, запись в журнал.
+    fn protected_hit(&mut self, phrase: &str, place: &str) -> String {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        let window = self.target.as_ref().map(|t| json!({"id": t.id, "app": t.app}));
+        self.target = None;
+        self.shot = None;
+        self.screen_clear_at = None;
+        crate::journal::write("protected_stop", window, json!({"phrase": phrase, "place": place}), Err("stop"));
+        format!("На экране «{phrase}» ({place}). {PROTECTED_STOP}")
+    }
+
+    /// Проверка снимка на запретный текст. На Windows без распознавания — действие запрещено.
+    fn check_image(&mut self, img: &RgbaImage) -> Result<(), String> {
+        if self.cfg.protected_phrases.is_empty() {
+            return Ok(());
+        }
+        match crate::ocr::recognize(img) {
+            Ok(text) => {
+                if let Some(p) = crate::ocr::find_protected(&text, &self.cfg.protected_phrases) {
+                    let p = p.to_string();
+                    return Err(self.protected_hit(&p, "текст в окне"));
+                }
+                self.screen_clear_at = Some(std::time::Instant::now());
+                Ok(())
+            }
+            Err(e) if cfg!(windows) => Err(format!(
+                "{e}. Защита запретных баз не работает, поэтому действие отклонено."
+            )),
+            Err(_) => Ok(()), // на других ОС распознавания пока нет: защищает только заголовок
+        }
+    }
+
+    /// Перед кликом или вводом: экран проверен не раньше чем 4 с назад, иначе свежий снимок.
+    fn guard_screen(&mut self, w: &Window) -> Result<(), String> {
+        if self.cfg.protected_phrases.is_empty() || !cfg!(windows) {
+            return Ok(());
+        }
+        if self.screen_clear_at.is_some_and(|t| t.elapsed() < Duration::from_secs(4)) {
+            return Ok(());
+        }
+        let img = w.capture_image().map_err(|e| format!("не удалось снять окно: {e}"))?;
+        self.check_image(&img)
     }
 
     fn tid(&self) -> u32 {
@@ -266,6 +319,7 @@ impl Pilot {
         }
         let g = geo(&w)?;
         let img = w.capture_image().map_err(|e| format!("не удалось снять окно: {e}"))?;
+        self.check_image(&img)?;
         let (sw, sh) = fit(img.width(), img.height(), self.cfg.max_long_edge, self.cfg.max_pixels);
         let small = if (sw, sh) == (img.width(), img.height()) {
             img
@@ -291,6 +345,7 @@ impl Pilot {
             None => return Err("сначала сделайте screenshot".into()),
         };
         let img = w.capture_image().map_err(|e| format!("не удалось снять окно: {e}"))?;
+        self.check_image(&img)?;
         let (fx, fy) = (img.width() as f64 / sent_w, img.height() as f64 / sent_h);
         let x0 = (r[0].min(r[2]).max(0.0) * fx) as u32;
         let y0 = (r[1].min(r[3]).max(0.0) * fy) as u32;
@@ -429,6 +484,7 @@ impl Pilot {
 
     pub fn click(&mut self, button: &str, count: u32, at: Option<(f64, f64)>, mods: &str) -> R {
         let w = self.live()?;
+        self.guard_screen(&w)?;
         self.front_for_mouse(&w);
         let pos = match at {
             Some((x, y)) => Some(self.to_screen(&w, x, y)?),
@@ -459,6 +515,7 @@ impl Pilot {
 
     pub fn drag(&mut self, from: (f64, f64), to: (f64, f64), mods: &str) -> R {
         let w = self.live()?;
+        self.guard_screen(&w)?;
         self.front_for_mouse(&w);
         let (ax, ay) = self.to_screen(&w, from.0, from.1)?;
         let (bx, by) = self.to_screen(&w, to.0, to.1)?;
@@ -491,6 +548,9 @@ impl Pilot {
     pub fn mouse_button(&mut self, down: bool) -> R {
         let w = self.live()?;
         if down {
+            self.guard_screen(&w)?;
+        }
+        if down {
             self.cursor_inside(&w)?;
         }
         let dir = if down { Direction::Press } else { Direction::Release };
@@ -513,6 +573,7 @@ impl Pilot {
 
     pub fn scroll(&mut self, dir: &str, amount: f64, at: Option<(f64, f64)>, mods: &str) -> R {
         let w = self.live()?;
+        self.guard_screen(&w)?;
         let pos = match at {
             Some((x, y)) => Some(self.to_screen(&w, x, y)?),
             None => {
@@ -541,6 +602,7 @@ impl Pilot {
 
     pub fn type_text(&mut self, text: &str) -> R {
         let w = self.live()?;
+        self.guard_screen(&w)?;
         self.ensure_keyboard(&w)?;
         policy::text_allowed(text)?;
         let stop = self.stop.clone();
@@ -588,6 +650,7 @@ impl Pilot {
 
     pub fn key(&mut self, combo: &str, repeat: f64) -> R {
         let w = self.live()?;
+        self.guard_screen(&w)?;
         self.ensure_keyboard(&w)?;
         let ks = keys::parse_combo(combo)?;
         let n = (repeat.round() as i32).clamp(1, 100);
@@ -610,6 +673,7 @@ impl Pilot {
 
     pub fn hold_key(&mut self, combo: &str, secs: f64) -> R {
         let w = self.live()?;
+        self.guard_screen(&w)?;
         self.ensure_keyboard(&w)?;
         let ks = keys::parse_combo(combo)?;
         let stop = self.stop.clone();

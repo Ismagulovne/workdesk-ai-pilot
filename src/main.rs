@@ -10,6 +10,7 @@ mod keys;
 mod killswitch;
 mod pilot;
 mod platform;
+mod ocr;
 mod policy;
 mod tools;
 
