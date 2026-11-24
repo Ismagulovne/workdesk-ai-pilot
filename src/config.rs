@@ -32,7 +32,7 @@ impl Default for Config {
                 "1password", "bitwarden", "keepass", "lastpass", "dashlane", "enpass",
                 "keychain access", "связка ключей", "credential manager", "диспетчер учетных данных",
                 "kaspi", "halyk", "homebank", "freedom bank", "jusan", "bcc.kz",
-                "wdpilot", "workdesk ai pilot",
+                "wdpilot", "workdesk ai pilot", "claude",
             ]),
             secret_title_patterns: s(&[
                 "password", "пароль", "құпия сөз", "passcode", "pin-код", "пин-код",
@@ -66,7 +66,7 @@ pub fn log_dir() -> PathBuf {
 impl Config {
     pub fn load() -> Config {
         let path = app_dir().join("config.json");
-        match std::fs::read_to_string(&path) {
+        let mut cfg = match std::fs::read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
                 eprintln!("wdpilot: config.json не прочитан ({e}), беру настройки по умолчанию");
                 Config::default()
@@ -79,6 +79,27 @@ impl Config {
                 }
                 cfg
             }
+        };
+        // Обязательные запреты нельзя убрать настройками: ИИ не управляет ни самим Pilot,
+        // ни чатом Claude (иначе мог бы сам нажать «Разрешить»).
+        for m in MANDATORY_DENY {
+            if !cfg.deny_apps.iter().any(|d| d.eq_ignore_ascii_case(m)) {
+                cfg.deny_apps.push(m.to_string());
+            }
+        }
+        cfg
+    }
+}
+
+pub const MANDATORY_DENY: [&str; 3] = ["wdpilot", "workdesk ai pilot", "claude"];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn mandatory_in_default() {
+        let c = super::Config::default();
+        for m in super::MANDATORY_DENY {
+            assert!(c.deny_apps.iter().any(|d| d == m));
         }
     }
 }

@@ -52,12 +52,28 @@ pub fn parse_key(name: &str) -> Result<Key, String> {
         _ => {
             let mut chars = n.chars();
             match (chars.next(), chars.next()) {
-                (Some(c), None) => Key::Unicode(c),
+                (Some(c), None) => char_key(c),
                 _ => return Err(format!("неизвестная клавиша: {name}")),
             }
         }
     };
     Ok(k)
+}
+
+/// Буква или цифра как клавиша. На Windows латиница и цифры — прямыми кодами VK,
+/// чтобы ctrl+s, ctrl+c и т. п. работали при любой раскладке (иначе при русской
+/// раскладке enigo шлёт символ текстом, и сочетание не срабатывает).
+fn char_key(c: char) -> Key {
+    #[cfg(windows)]
+    {
+        if c.is_ascii_lowercase() {
+            return Key::Other(c.to_ascii_uppercase() as u32);
+        }
+        if c.is_ascii_digit() {
+            return Key::Other(c as u32);
+        }
+    }
+    Key::Unicode(c)
 }
 
 pub fn is_modifier(k: &Key) -> bool {
@@ -70,7 +86,9 @@ mod tests {
 
     #[test]
     fn combos() {
-        assert_eq!(parse_combo("ctrl+s").unwrap(), vec![Key::Control, Key::Unicode('s')]);
+        assert_eq!(parse_combo("ctrl+s").unwrap(), vec![Key::Control, char_key('s')]);
+        #[cfg(windows)]
+        assert_eq!(parse_combo("ctrl+S").unwrap(), vec![Key::Control, Key::Other(0x53)]);
         assert_eq!(parse_combo("Return").unwrap(), vec![Key::Return]);
         assert_eq!(parse_combo("ctrl+shift+T").unwrap().len(), 3);
         assert!(parse_combo("ctrl+nonsense").is_err());

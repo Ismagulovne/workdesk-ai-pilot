@@ -74,6 +74,16 @@ fn geo(w: &Window) -> Result<Geo, String> {
     })
 }
 
+/// Имя приложения для людей: если ОС отдаёт полный путь к exe — только имя файла без расширения.
+pub fn app_name(w: &Window) -> String {
+    let raw = w.app_name().unwrap_or_default();
+    if raw.contains('\\') || raw.contains('/') {
+        let file = raw.rsplit(['\\', '/']).next().unwrap_or(&raw);
+        return file.strip_suffix(".exe").or_else(|| file.strip_suffix(".EXE")).unwrap_or(file).to_string();
+    }
+    raw
+}
+
 fn find(id: u32) -> Result<Window, String> {
     Window::all()
         .map_err(|e| format!("не удалось получить список окон: {e}"))?
@@ -110,7 +120,7 @@ pub fn windows_json(cfg: &Config) -> Result<Value, String> {
             continue;
         }
         let title = w.title().unwrap_or_default();
-        let app = w.app_name().unwrap_or_default();
+        let app = app_name(&w);
         if title.trim().is_empty() && app.trim().is_empty() {
             continue;
         }
@@ -153,7 +163,7 @@ impl Pilot {
 
     pub fn select_window(&mut self, id: u32) -> R {
         let w = find(id)?;
-        let app = w.app_name().unwrap_or_default();
+        let app = app_name(&w);
         let title = w.title().unwrap_or_default();
         let pid = w.pid().map_err(es)?;
         policy::window_allowed(&self.cfg, &app, &title)?;
@@ -534,13 +544,15 @@ impl Pilot {
         self.ensure_keyboard(&w)?;
         policy::text_allowed(text)?;
         let stop = self.stop.clone();
-        let chars: Vec<char> = text.chars().collect();
-        for chunk in chars.chunks(40) {
+        // По одному символу с паузой: приложения на WinUI (Блокнот Windows 11 и др.)
+        // теряют или искажают символы, если весь текст приходит одной пачкой.
+        for c in text.chars() {
             if killswitch::stopped(&stop) {
                 return Err(STOPPED.into());
             }
-            let s: String = chunk.iter().collect();
-            self.enigo()?.text(&s).map_err(ie)?;
+            let mut buf = [0u8; 4];
+            self.enigo()?.text(c.encode_utf8(&mut buf)).map_err(ie)?;
+            std::thread::sleep(Duration::from_millis(8));
         }
         Ok(Out::Text("OK".into()))
     }

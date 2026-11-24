@@ -103,5 +103,6 @@ mod tests {
         assert!(typing_allowed(&c, "Блокнот — отчёт.txt").is_ok());
         assert!(window_allowed(&c, "KeePassXC", "db.kdbx").is_err());
         assert!(window_allowed(&c, "1cv8", "1С:Предприятие").is_ok());
+        assert!(window_allowed(&c, "Claude", "Claude").is_err());
     }
 }
