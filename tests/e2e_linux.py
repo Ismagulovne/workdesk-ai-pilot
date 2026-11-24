@@ -54,9 +54,14 @@ class Server:
 
 
 s = Server()
-res = s.call("list_windows")
-wins = json.loads(res["content"][0]["text"])
-target = next((w for w in wins if "e2e-term" in w["title"] or "xterm" in w["app"].lower()), None)
+target, wins = None, []
+for _ in range(15):  # xterm под Xvfb иногда стартует дольше пары секунд
+    res = s.call("list_windows")
+    wins = json.loads(res["content"][0]["text"])
+    target = next((w for w in wins if "e2e-term" in w["title"] or "xterm" in w["app"].lower()), None)
+    if target:
+        break
+    time.sleep(1)
 check(target is not None, "xterm найден в list_windows")
 if target is None:
     print(json.dumps(wins, ensure_ascii=False, indent=1))
