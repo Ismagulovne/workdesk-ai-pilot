@@ -153,8 +153,8 @@ const HELP: &str = "wdpilot — WorkDesk AI Pilot, MCP-сервер управл
 Запуск как MCP-сервер (stdio):   wdpilot
 Список окон (отладка):           wdpilot --list-windows
 Список запретов:                 wdpilot --blocklist
-Добавить в запреты:              wdpilot --block "ТОО ФРК РОЗНИЦА"
-Убрать из запретов:              wdpilot --unblock "ТОО ФРК РОЗНИЦА"
+Добавить в запреты:              wdpilot --block «ТОО ФРК РОЗНИЦА»
+Убрать из запретов:              wdpilot --unblock «ТОО ФРК РОЗНИЦА»
 Проверка без экрана (CI):        wdpilot --self-test
 Версия:                          wdpilot --version
 
