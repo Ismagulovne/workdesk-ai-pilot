@@ -47,6 +47,21 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--ocr") {
+        // Диагностика защиты: что распознано в окне и найдена ли запретная фраза.
+        let id: u32 = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let code = match pilot::ocr_window(id, &cfg) {
+            Ok(report) => {
+                println!("{report}");
+                0
+            }
+            Err(e) => {
+                eprintln!("wdpilot: {e}");
+                1
+            }
+        };
+        std::process::exit(code);
+    }
 
     let stop = killswitch::start();
     let mut pilot = pilot::Pilot::new(cfg, stop);

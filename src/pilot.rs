@@ -79,6 +79,21 @@ fn geo(w: &Window) -> Result<Geo, String> {
     })
 }
 
+/// Диагностика: распознать текст окна и проверить запретные фразы (только для отладки,
+/// печатает распознанный текст — запускать на тестовых окнах).
+pub fn ocr_window(id: u32, cfg: &Config) -> Result<String, String> {
+    let w = find(id)?;
+    let img = w.capture_image().map_err(|e| format!("не удалось снять окно: {e}"))?;
+    let t0 = std::time::Instant::now();
+    let text = crate::ocr::recognize(&img)?;
+    let ms = t0.elapsed().as_millis();
+    let hit = crate::ocr::find_protected(&text, &cfg.protected_phrases);
+    Ok(format!(
+        "окно {}x{}, распознавание {ms} мс, символов {}\n--- текст ---\n{text}\n--- нормализовано ---\n{}\n--- запретные фразы {:?} ---\nсовпадение: {:?}",
+        img.width(), img.height(), text.chars().count(), crate::ocr::normalize(&text), cfg.protected_phrases, hit
+    ))
+}
+
 /// Имя приложения для людей: если ОС отдаёт полный путь к exe — только имя файла без расширения.
 pub fn app_name(w: &Window) -> String {
     let raw = w.app_name().unwrap_or_default();
