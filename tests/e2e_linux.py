@@ -57,6 +57,9 @@ s = Server()
 target, wins = None, []
 for _ in range(15):  # xterm под Xvfb иногда стартует дольше пары секунд
     res = s.call("list_windows")
+    if res["isError"]:  # оконный менеджер ещё не поднялся (_NET_CLIENT_LIST_STACKING)
+        time.sleep(1)
+        continue
     wins = json.loads(res["content"][0]["text"])
     target = next((w for w in wins if "e2e-term" in w["title"] or "xterm" in w["app"].lower()), None)
     if target:

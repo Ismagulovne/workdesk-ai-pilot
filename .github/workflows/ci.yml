@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config clang libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev \
             libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev libx11-dev libxdo-dev \
-            xvfb openbox xterm xdotool
+            xvfb openbox xterm xdotool x11-utils
 
       - name: Unit tests
         if: matrix.target != 'x86_64-apple-darwin'
@@ -59,7 +59,7 @@ jobs:
           export DISPLAY=:99
           sleep 1
           openbox &
-          sleep 1
+          for i in $(seq 1 20); do xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q window && break; sleep 0.5; done
           xterm -geometry 100x30+100+100 -T "e2e-term" &
           sleep 2
           python3 tests/e2e_linux.py ./target/${{ matrix.target }}/release/wdpilot
