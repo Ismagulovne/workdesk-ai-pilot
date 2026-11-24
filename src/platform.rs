@@ -62,6 +62,46 @@ mod imp {
     }
 }
 
+/// Ввод текста на Windows: каждый UTF-16 символ — отдельные SendInput «нажать» и «отпустить»
+/// (KEYEVENTF_UNICODE) с паузами. Пачка событий от enigo в Блокноте Windows 11 теряла
+/// и дублировала символы. Возвращает false, если прервали стоп-клавишей.
+#[cfg(windows)]
+pub fn type_unicode(text: &str, stop: &std::sync::atomic::AtomicBool) -> Result<bool, String> {
+    use std::time::Duration;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+    };
+    fn send(unit: u16, up: bool) -> Result<(), String> {
+        let input = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: 0,
+                    wScan: unit,
+                    dwFlags: KEYEVENTF_UNICODE | if up { KEYEVENTF_KEYUP } else { 0 },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let n = unsafe { SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) };
+        if n == 1 { Ok(()) } else { Err("SendInput: ввод заблокирован (окно с правами администратора?)".into()) }
+    }
+    let mut buf = [0u16; 2];
+    for c in text.chars() {
+        if crate::killswitch::stopped(stop) {
+            return Ok(false);
+        }
+        for &unit in c.encode_utf16(&mut buf).iter() {
+            send(unit, false)?;
+            std::thread::sleep(Duration::from_millis(4));
+            send(unit, true)?;
+        }
+        std::thread::sleep(Duration::from_millis(14));
+    }
+    Ok(true)
+}
+
 #[cfg(not(windows))]
 mod imp {
     pub fn bring_to_front(_id: u32) -> bool {

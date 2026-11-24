@@ -544,8 +544,28 @@ impl Pilot {
         self.ensure_keyboard(&w)?;
         policy::text_allowed(text)?;
         let stop = self.stop.clone();
-        // По одному символу с паузой: приложения на WinUI (Блокнот Windows 11 и др.)
-        // теряют или искажают символы, если весь текст приходит одной пачкой.
+        #[cfg(windows)]
+        {
+            // Переводы строк и табуляцию — клавишами, остальное — посимвольно через SendInput.
+            let parts = text.split_inclusive(['\n', '\t']);
+            for part in parts {
+                let (body, special) = match part.chars().last() {
+                    Some('\n') => (&part[..part.len() - 1], Some(Key::Return)),
+                    Some('\t') => (&part[..part.len() - 1], Some(Key::Tab)),
+                    _ => (part, None),
+                };
+                let body = body.trim_end_matches('\r');
+                if !platform::type_unicode(body, &stop)? {
+                    return Err(STOPPED.into());
+                }
+                if let Some(k) = special {
+                    self.enigo()?.key(k, Direction::Click).map_err(ie)?;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+            return Ok(Out::Text("OK".into()));
+        }
+        #[allow(unreachable_code)]
         for c in text.chars() {
             if killswitch::stopped(&stop) {
                 return Err(STOPPED.into());
