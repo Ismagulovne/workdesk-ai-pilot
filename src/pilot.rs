@@ -507,6 +507,11 @@ impl Pilot {
             return Err(format!("в text для мыши допускаются только модификаторы, получено {k:?}"));
         }
         let stop = self.stop.clone();
+        // Повторная проверка стопа прямо перед нажатием: между проверкой окна и вводом
+        // (OCR, диалог одобрения) человек мог нажать стоп.
+        if killswitch::stopped(&stop) {
+            return Err(STOPPED.into());
+        }
         let en = self.enigo()?;
         for k in &mods {
             en.key(*k, Direction::Press).map_err(ie)?;
@@ -693,6 +698,9 @@ impl Pilot {
         let ks = keys::parse_combo(combo)?;
         if ks.contains(&Key::Return) {
             self.guard_enter(&w)?;
+        }
+        if killswitch::stopped(&self.stop) {
+            return Err(STOPPED.into());
         }
         let n = (repeat.round() as i32).clamp(1, 100);
         let stop = self.stop.clone();
