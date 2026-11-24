@@ -546,7 +546,16 @@ impl Pilot {
         let stop = self.stop.clone();
         #[cfg(windows)]
         {
-            // Переводы строк и табуляцию — клавишами, остальное — посимвольно через SendInput.
+            if killswitch::stopped(&stop) {
+                return Err(STOPPED.into());
+            }
+            // Основной путь — вставка через буфер обмена: посимвольный ввод в приложениях
+            // на WinUI (Блокнот Windows 11) искажал отдельные символы.
+            if platform::paste_text(text)? {
+                return Ok(Out::Text("OK".into()));
+            }
+            // В буфере картинка или файлы — не трогаем их, вводим посимвольно.
+            // Переводы строк и табуляцию — клавишами, остальное — через SendInput.
             let parts = text.split_inclusive(['\n', '\t']);
             for part in parts {
                 let (body, special) = match part.chars().last() {

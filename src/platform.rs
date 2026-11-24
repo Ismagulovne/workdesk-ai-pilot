@@ -102,6 +102,138 @@ pub fn type_unicode(text: &str, stop: &std::sync::atomic::AtomicBool) -> Result<
     Ok(true)
 }
 
+/// Вставка текста через буфер обмена (Windows): сохранить текст буфера пользователя,
+/// положить наш текст с пометками «не в историю, не в облако, не для менеджеров буфера»,
+/// нажать Ctrl+V, вернуть прежний текст. Если в буфере сейчас не текст (картинка, файлы) —
+/// не трогаем его и возвращаем Ok(false): вызывающий введёт текст посимвольно.
+#[cfg(windows)]
+pub fn paste_text(text: &str) -> Result<bool, String> {
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::{GlobalFree, HANDLE};
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, CountClipboardFormats, EmptyClipboard, GetClipboardData,
+        IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    };
+    const CF_UNICODETEXT: u32 = 13;
+
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            unsafe { CloseClipboard() };
+        }
+    }
+    fn open() -> Result<Guard, String> {
+        for _ in 0..25 {
+            if unsafe { OpenClipboard(std::ptr::null_mut()) } != 0 {
+                return Ok(Guard);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Err("буфер обмена занят другой программой".into())
+    }
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+    unsafe fn put(format: u32, bytes: &[u8]) -> bool {
+        let h = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1));
+        if h.is_null() {
+            return false;
+        }
+        let p = GlobalLock(h) as *mut u8;
+        if p.is_null() {
+            GlobalFree(h);
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
+        GlobalUnlock(h);
+        if SetClipboardData(format, h as HANDLE).is_null() {
+            GlobalFree(h);
+            return false;
+        }
+        true
+    }
+    unsafe fn put_text_private(s: &str) -> bool {
+        let w = wide(s);
+        let bytes = std::slice::from_raw_parts(w.as_ptr() as *const u8, w.len() * 2);
+        if !put(CF_UNICODETEXT, bytes) {
+            return false;
+        }
+        // Пометки для истории буфера Windows (Win+V), облачного буфера и менеджеров буфера.
+        let zero = 0u32.to_ne_bytes();
+        for name in ["ExcludeClipboardContentFromMonitorProcessing", "CanIncludeInClipboardHistory", "CanUploadToCloudClipboard"] {
+            let f = RegisterClipboardFormatW(wide(name).as_ptr());
+            if f != 0 {
+                put(f, &zero);
+            }
+        }
+        true
+    }
+    unsafe fn read_text() -> Option<String> {
+        let h = GetClipboardData(CF_UNICODETEXT);
+        if h.is_null() {
+            return None;
+        }
+        let p = GlobalLock(h) as *const u16;
+        if p.is_null() {
+            return None;
+        }
+        let max = GlobalSize(h) / 2;
+        let mut len = 0;
+        while len < max && *p.add(len) != 0 {
+            len += 1;
+        }
+        let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+        GlobalUnlock(h);
+        Some(s)
+    }
+    fn key(vk: u16, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: if up { KEYEVENTF_KEYUP } else { 0 }, time: 0, dwExtraInfo: 0 },
+            },
+        }
+    }
+
+    let text = text.replace("\r\n", "\n").replace('\n', "\r\n");
+    let saved = {
+        let _g = open()?;
+        let count = unsafe { CountClipboardFormats() };
+        let has_text = unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) } != 0;
+        if count > 0 && !has_text {
+            return Ok(false); // в буфере картинка или файлы — не портим
+        }
+        let saved = if has_text { unsafe { read_text() } } else { None };
+        unsafe {
+            EmptyClipboard();
+            if !put_text_private(&text) {
+                return Err("не удалось положить текст в буфер обмена".into());
+            }
+        }
+        saved
+    };
+    // Ctrl+V
+    let seq = [key(0x11, false), key(0x56, false), key(0x56, true), key(0x11, true)];
+    for k in &seq {
+        unsafe { SendInput(1, k, std::mem::size_of::<INPUT>() as i32) };
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Даём приложению прочитать буфер, затем возвращаем пользователю его текст.
+    std::thread::sleep(Duration::from_millis(400));
+    let _g = open()?;
+    unsafe {
+        EmptyClipboard();
+        if let Some(old) = saved {
+            put_text_private(&old);
+        }
+    }
+    Ok(true)
+}
+
 #[cfg(not(windows))]
 mod imp {
     pub fn bring_to_front(_id: u32) -> bool {
