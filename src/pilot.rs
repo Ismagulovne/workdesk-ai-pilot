@@ -184,19 +184,17 @@ impl Pilot {
         policy::window_allowed(&self.cfg, &app, &title)?;
         let trusted = self.cfg.trusted_apps.iter().any(|a| a.eq_ignore_ascii_case(&app));
         if !trusted {
-            let answer = rfd::MessageDialog::new()
-                .set_level(rfd::MessageLevel::Warning)
-                .set_title("WorkDesk AI Pilot — разрешить ИИ управлять окном?")
-                .set_description(format!(
+            let allowed = platform::confirm(
+                "WorkDesk AI Pilot — разрешить ИИ управлять окном?",
+                &format!(
                     "ИИ-агент просит управлять окном:\n\n{app} — «{title}»\n\n\
                      Он будет видеть только это окно и нажимать в нём мышью и клавиатурой.\n\
                      Пароли, коды и платёжные данные он вводить не будет.\n\n\
                      Остановить в любой момент: Ctrl+Alt+Q или увести мышь в левый верхний угол экрана.\n\n\
                      Разрешить?"
-                ))
-                .set_buttons(rfd::MessageButtons::YesNo)
-                .show();
-            if answer != rfd::MessageDialogResult::Yes {
+                ),
+            );
+            if !allowed {
                 self.target = None;
                 self.shot = None;
                 return Err("пользователь не разрешил управлять этим окном".into());
@@ -308,17 +306,14 @@ impl Pilot {
     }
 
     fn ask_override(&mut self, blocked: &str, what: &str) -> Result<(), String> {
-        let answer = rfd::MessageDialog::new()
-            .set_level(rfd::MessageLevel::Warning)
-            .set_title("WorkDesk AI Pilot — цель из вашего списка запретов")
-            .set_description(format!(
+        let ok = platform::confirm(
+            "WorkDesk AI Pilot — цель из вашего списка запретов",
+            &format!(
                 "ИИ хочет {what}.\n\nВ окне видна «{blocked}» — она в вашем списке запретов: \
                  без вашего одобрения ИИ в неё не заходит и ничего в ней не делает.\n\n\
                  Разрешить это одно действие?"
-            ))
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .show();
-        let ok = answer == rfd::MessageDialogResult::Yes;
+            ),
+        );
         let window = self.target.as_ref().map(|t| json!({"id": t.id, "app": t.app}));
         crate::journal::write(
             "blocklist_check",

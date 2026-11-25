@@ -1,6 +1,38 @@
 //! Платформенные проверки: DPI, вывод окна на передний план, кто владеет точкой экрана,
 //! находится ли фокус в поле пароля (Windows: стиль ES_PASSWORD у стандартного Edit).
 
+/// Вопрос человеку «Да / Нет». По умолчанию выбрано «Нет» (случайный Enter — отказ),
+/// окно поверх всех и выводится на передний план.
+pub fn confirm(title: &str, text: &str) -> bool {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            MessageBoxW, IDYES, MB_DEFBUTTON2, MB_ICONWARNING, MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO,
+        };
+        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (t, c) = (w(text), w(title));
+        let r = unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                t.as_ptr(),
+                c.as_ptr(),
+                MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND,
+            )
+        };
+        r == IDYES
+    }
+    #[cfg(not(windows))]
+    {
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title(title)
+            .set_description(text)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show()
+            == rfd::MessageDialogResult::Yes
+    }
+}
+
 pub fn init() {
     #[cfg(windows)]
     {
